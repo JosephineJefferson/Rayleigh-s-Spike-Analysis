@@ -15,16 +15,27 @@
 using MAT
 using Plots
 using StatsBase
+using DSP
+#using LsqFit
+#using ApproxFun
 gr()
 
-file = matopen("C:/Users/josep/OneDrive/Desktop/RayleighSpikePlotter/Data/CA87_06_38_02152006_unknown_mgp.mat") #change file here
+file = matopen("C:/Users/josep/OneDrive/Desktop/RayleighSpikePlotter/Data/CA87_15_89_02152006_unknown_mgp.mat") #change file here
 spikeTimes = read(file, "spt") #spike times in s
 time = read(file, "t") #time in seconds
 dt=time[2]-time[1] #timestep, derived from time array
 stimCurve = read(file,"u") #points along curve
+chopping=true
 choppedStimCurve= Float64[]
 choppedTime=Float64[]
 choppedSpikeTimes=zeros(length(spikeTimes)) #to put spikes which occur within window of interest
+freq=0
+#Parameters of equation
+A=0
+k=0
+b=0
+#array to store y values of fitted line
+simData=zeros(length(time))
 
 #plots stimulus
 function plotStimulusWaveform()
@@ -40,41 +51,16 @@ function plotChoppedStimulusWaveform()
     display(choppedStimulusPlot)
 end
 
-#Code identifying frequency
-function findFrequency()
-    possFreq = Float64[0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8]
-    #all of the frequencies which were tested
-    locOfPeakRAW=findmax(stimCurve)
-    cart = (locOfPeakRAW[2])
-    startIndex = cart[2] #these 3 lines for extracting index of highest
-    count = 0
-    i = startIndex
-
-    while stimCurve[i]>=stimCurve[i+1] || stimCurve[i-1]>=stimCurve[i+3]
-        count +=1
-        i +=1
-    end
-
-    cycleTime=count*dt*2
-    #println(cycleTime)
-    approxHz=1/cycleTime
-    #println(approxHz)
-
-    #and then subtract approxHz from each off possFreq
-    #square answers. Whichever possFreq produces lowest result
-    #must be intended stimulus frequency
-end
-
 #trims data to only include region of high stimulus amplitude
 function chopData()
-    positveThresh=percentile(stimCurve[:], 98)
-    negativeThresh=percentile(stimCurve[:], 2)
+    positveThresh=percentile(stimCurve[:], 99)
+    negativeThresh=percentile(stimCurve[:], 1)
     i=1
-    while stimCurve[i]<=positveThresh && stimCurve[i]>=negativeThresh
+    while stimCurve[i]<positveThresh && stimCurve[i]>negativeThresh
         i+=1
     end
-    j=length(stimCurve[:])
-    while stimCurve[j]<=positveThresh && stimCurve[j]>=negativeThresh
+    j=length(stimCurve)
+    while stimCurve[j]<positveThresh && stimCurve[j]>negativeThresh
         j-=1
     end
     global choppedStimCurve=stimCurve[i:j]
@@ -89,22 +75,96 @@ function chopData()
         end
     end
     global choppedSpikeTimes=choppedSpikeTimes[1:a-1]
-    # println("start")
-    # println(length(choppedStimCurve))
-    # println(length(choppedTime))
-    # println(choppedStart)
-    # println(choppedEnd)
-    # println(length(choppedSpikeTimes))
+    global simData = zeros(length(choppedTime))
 end
 
-plotStimulusWaveform()
-#findFrequency()
-chopData()
-plotChoppedStimulusWaveform()
+#finds frequency of high amplitude portion of data
+function mikesPeriodogram(show=false)
+    if chopping == false
+        s = stimCurve[:]
+    else
+        s = choppedStimCurve[:]
+    end
+    pg = periodogram(s[:], fs = 1/dt)         # signal power as a fcn of freq
+    i15Hz = minimum(findall(x -> x>15.0, pg.freq)) # index of 15Hz
+    f = pg.freq[findmax(pg.power)[2]]     # frequency of peak power
+    if show==true
+        display(plot(pg.freq[1:i15Hz], pg.power[1:i15Hz],
+            title="power", xlabel = "frequency (Hz)")) # plot up to 15Hz
+        display(plot(pg.freq[1:i15Hz], pg.power[1:i15Hz], yaxis=:log,
+            title="log power", xlabel="frequency (Hz) (nb power at 0 = signal mean )"))
+        println("Frequency = ", f, " (", round(f; digits=1), ")")
+    end
+    return f
+end
 
-#Code saying how many cycles we have in chopped bit
+#finds the parameters of the fitted sine wave
+function findParams(chopped=chopping)
+    if chopped == false
+        t = time[:]
+        s = stimCurve[:]
+    else
+        t = choppedTime[:]
+        s = choppedStimCurve[:]
+    end
+    global A = findmax(s[:])[1]
+    global k = freq*2*pi
+    index=length(t)÷2
+    while s[index]>=A || s[index]<=-A
+        index+=20
+    end
+    global b = asin(s[index]/A)/-k + t[index]
+end
 
-#Code using frequency to identify cycle length in s
+#called by other functions to make calculations based on
+#fitted curve
+function yBasedOnTime(t1::Float64)
+    answer = A*sin(k*(t1-b))
+    return answer
+end
+
+#called by other functions to make calculations based on
+#fitted curve
+function timeBasedOnY(y1::Float64)
+    if y1>A
+        y1=A
+    elseif y1<A*-1
+        y1=A*-1
+    end
+    answer = (asin(y1/A))/k + b
+    return answer
+end
+
+#plots the fit curve over the stimulus wave
+function plotFitOnStim(chopped=chopping)
+    if chopped == false
+        t = time[:]
+        s = stimCurve[:]
+    else
+        t = choppedTime[:]
+        s = choppedStimCurve[:]
+    end
+    c=1
+    while c<=length(simData)
+        global simData[c]= yBasedOnTime(t[c])
+        c += 1
+    end
+    p1=plot(t[:], s[:], label="stimulus")
+    plot!(t[:], simData[:], label="fit")
+    display(p1)
+end
+
+
+
+#plotStimulusWaveform()
+if chopping
+    chopData()
+    #plotChoppedStimulusWaveform()
+end
+freq = mikesPeriodogram()
+findParams()
+plotFitOnStim()
+
 
 #function transforming time in s to angle in radians based on frequency
 #OR be more accurate and base transformation on stimCurve at
