@@ -1,7 +1,7 @@
 #Julia script destined to read Matlab files including
 #spike train data and a sine wave showing the stimulus.
 
-#A key part of my LA internship. Will make Rayleigh Z plots
+#A part of my LA internship. Will make Rayleigh Z plots
 #aiming to ellucidate whether there is phase locking in
 #vestibular afferents of animals treated with low doses of
 #gentamycin.
@@ -36,6 +36,8 @@ k=0
 b=0
 #array to store y values of fitted line
 simData=zeros(length(time))
+#array to store converted spike times
+sptAsRadians=zeros(length(spikeTimes))
 
 #plots stimulus
 function plotStimulusWaveform()
@@ -49,6 +51,21 @@ function plotChoppedStimulusWaveform()
     choppedStimulusPlot = plot(choppedTime[:], choppedStimCurve[:],
     legend=false,title="Trimmed Stimulus Waveform")
     display(choppedStimulusPlot)
+end
+
+function plotStimRelativeToAngle(chopped=chopping)
+    if chopped == false
+        t = time[:]
+    else
+        t = choppedTime[:]
+    end
+    radiansg=zeros(length(t))
+    co=1
+    while co<=length(radiansg)
+        radiansg[co] = timeToRadians(t[co])
+        co +=1
+    end
+    display(plot(radiansg[:],simData[:]))
 end
 
 #trims data to only include region of high stimulus amplitude
@@ -76,11 +93,12 @@ function chopData()
     end
     global choppedSpikeTimes=choppedSpikeTimes[1:a-1]
     global simData = zeros(length(choppedTime))
+    global sptAsRadians = zeros(length(choppedSpikeTimes))
 end
 
 #finds frequency of high amplitude portion of data
-function mikesPeriodogram(show=false)
-    if chopping == false
+function mikesPeriodogram(show=false, chopped=chopping)
+    if chopped == false
         s = stimCurve[:]
     else
         s = choppedStimCurve[:]
@@ -123,18 +141,6 @@ function yBasedOnTime(t1::Float64)
     return answer
 end
 
-#called by other functions to make calculations based on
-#fitted curve
-function timeBasedOnY(y1::Float64)
-    if y1>A
-        y1=A
-    elseif y1<A*-1
-        y1=A*-1
-    end
-    answer = (asin(y1/A))/k + b
-    return answer
-end
-
 #plots the fit curve over the stimulus wave
 function plotFitOnStim(chopped=chopping)
     if chopped == false
@@ -154,26 +160,89 @@ function plotFitOnStim(chopped=chopping)
     display(p1)
 end
 
+#finds y intercepts of fitted curve and returns an array with
+#the indexes of these intercepts
+#called by timeToRadians
+function findFittedIntercepts(chopped=chopping)
+    if chopped == false
+        t = time[:]
+    else
+        t = choppedTime[:]
+    end
+    u=simData
+    index=1
+    interceptNo=0
+    interceptsInd=zeros(length(t))
+    while index<length(u)
+        if (u[index]>=0 && u[index+1]<=0) || (u[index]<=0 && u[index+1]>=0)
+            interceptNo+=1
+            interceptsInd[interceptNo]=index
+            index+=20
+        end
+        index+=1
+    end
+    interceptsInd=interceptsInd[1:interceptNo]
+    # interceptvals=zeros(length(interceptsInd))
+    # c=1
+    # while c>=length(interceptsInd)
+    #     interceptvals[c]=u[interceptsInd[c]]
+    #     c+=1
+    # end
+    # println(interceptvals)
+    return interceptsInd
+end
 
+#takes a time and converts it to radians based on phase length
+#and a shift. Shift calculated based on time and gradient-sign
+#of first y intercept
+function timeToRadians(t1::Float64, chopped=chopping)
+    if chopped == false
+        t = time[:]
+    else
+        t = choppedTime[:]
+    end
+    u=simData[:]
+    phLen = 1/freq
+    intcpt1 = Int(findFittedIntercepts()[1])
+    mult=2pi/phLen
+    shift=0
+    if u[intcpt1]<u[intcpt1+1]
+        shift=-mult*t[intcpt1]
+    else
+        shift=pi-mult*t[intcpt1]
+    end
+    answer = t1*mult + shift
+    while answer>=2pi
+        answer=answer-2pi
+    end
+    while answer<0
+        answer+=2pi
+    end
+    return answer
+end
 
-#plotStimulusWaveform()
+#converts all (relevant) spiketimes to angles in radians
+function convertSpikeTimes(chopped=chopping)
+    if chopped == false
+        spt = spikeTimes[:]
+    else
+        spt = choppedSpikeTimes[:]
+    end
+    count=1
+    while count<=length(spt)
+        sptAsRadians[count]=timeToRadians(spt[count])
+        count+=1
+    end
+end
+
+#now we do stats!
+
+#main code, calling functions
+
 if chopping
     chopData()
-    #plotChoppedStimulusWaveform()
 end
 freq = mikesPeriodogram()
 findParams()
 plotFitOnStim()
-
-
-#function transforming time in s to angle in radians based on frequency
-#OR be more accurate and base transformation on stimCurve at
-#each timepoint <- YES do this
-
-
-#for every angle, while angle>2pi, angle=angle-2pi
-
-# struct Spike_Count:
-#     location :: Float64
-#     frequency :: Int
-# end
+convertSpikeTimes()
