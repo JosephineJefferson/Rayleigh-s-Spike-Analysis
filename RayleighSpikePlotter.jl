@@ -18,7 +18,7 @@ using StatsBase
 using DSP
 gr()
 
-file = matopen("C:/Users/josep/OneDrive/Desktop/RayleighSpikePlotter/Data/CA88_08_33_02222006_3.2_mgp.mat") #change file here
+file = matopen("C:/Users/josep/OneDrive/Desktop/RayleighSpikePlotter/Data/CA88_08_34_02222006_6.4_mgp.mat") #change file here
 spikeTimes = read(file, "spt") #spike times in s
 time = read(file, "t") #time in seconds
 dt=time[2]-time[1] #timestep, derived from time array
@@ -140,15 +140,22 @@ function findParams(chopped=chopping)
         t = choppedTime[:]
         s = choppedStimCurve[:]
     end
-    global A = findmax(s[:])[1]
+    a1=findmax(s[:])[1]
+    if abs(findmin(s[:])[1])>a1
+        a1=abs(findmin(s[:])[1])
+    end
+    global A = a1
     global k = freq*2*pi
     index=length(t)÷2
-    while s[index]>=A || s[index]<=-A
-        index+=20
+    # while s[index]>=A || s[index]<=-A
+    #     index+=20
+    # end
+    b1=-asin(s[index]/A)/k + t[index]
+    while s[index-55]-A*sin(k*(t[index-55]-b1))>0.00001
+        index+=13
+        b1=-asin(s[index]/A)/k + t[index]
     end
-    #b calculation is unreliable
-    global b = asin(s[index]/A)/-k + t[index]
-    #global b = acsc(A/s[index])/-k + t[index]
+    global b = b1
 end
 
 #called by other functions to make calculations based on
@@ -218,17 +225,17 @@ function timeToRadians(t1::Float64, chopped=chopping)
     intcpt1 = Int(findFittedIntercepts()[1])
     mult=2pi/phLen
     shift=0
-    if u[intcpt1]<u[intcpt1+1]
+    if u[intcpt1]<u[intcpt1+1] #check gradient of 0 intcpt
         shift=-mult*t[intcpt1]
     else
         shift=pi-mult*t[intcpt1]
     end
     answer = t1*mult + shift
     while answer>=2*pi
-        answer=answer-2*pi
+        answer=answer-(2*pi)
     end
     while answer<0
-        answer+=2*pi
+        answer+= 2*pi
     end
     return answer
 end
@@ -307,15 +314,30 @@ function displayPolar()
     display(polarplot)
 end
 
+function significanceTest()
+    spikes=sptAsRadians[:]
+    r=meanVsize
+    n=length(spikes)
+    bigR=r*n
+    println("Rayleigh's R: ", bigR)
+    rayZed=(bigR^2)/n
+    println("Rayleigh's Z: ", rayZed)
+    P = exp(sqrt(1+4n+4(n^2-bigR^2))-(1+2n))
+    println("p: ",P)
+end
+
 #main code, calling functions
 
 if chopping
     chopData()
 end
-freq = mikesPeriodogram(true)
+#plotStimulusWaveform()
+#plotChoppedStimulusWaveform()
+freq = mikesPeriodogram()
 findParams()
-mapFitOnStim(true)
-#convertSpikeTimes()
+mapFitOnStim()
+convertSpikeTimes()
 #plotStimRelativeToAngle()
-#meanVectorCalc(true)
-#displayPolar()
+meanVectorCalc(true)
+displayPolar()
+significanceTest()
